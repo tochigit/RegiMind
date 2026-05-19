@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users             User[]
+  regulations       Regulation[]
+  internalDocuments InternalDocument[]
+  impactAssessments ImpactAssessment[]
+  tasks             Task[]
+  auditLogs         AuditLog[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  role           String   @default("viewer") // admin, manager, viewer
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+}
+
+model Regulation {
+  id            String   @id @default(cuid())
+  title         String
+  source        String   // FDA, EU, ISO
+  region        String   // US, EU, International
+  status        String   @default("new") // new, assessed, archived
+  effectiveDate DateTime?
+  publishedDate DateTime @default(now())
+  rawText       String
+  aiSummary     String?
+  deltaJson     String?  // JSON string of regulatory deltas
+  needsReview   Boolean  @default(false) // Flagged for manual review if AI fails
+  organizationId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  impactAssessments ImpactAssessment[]
+  bookmarks Bookmark[]
+  tags Tag[]
+  regulationTags RegulationTag[]
+  checklistItems ChecklistItem[]
+  regulationChanges RegulationChange[]
+}
+
+model InternalDocument {
+  id             String   @id @default(cuid())
+  title          String
+  docType        String   // SOP, Quality Manual, Risk Report, etc.
+  fileName       String?
+  fileContent    String?  // Text content of the document
+  scope          String?  // e.g., "Risk Management", "QMS"
+  clause         String?  // e.g., "ISO 14971"
+  version        String?
+  status         String   @default("active") // active, draft, archived
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  impactAssessments ImpactAssessment[]
+}
+
+model ImpactAssessment {
+  id             String   @id @default(cuid())
+  regulationId   String
+  documentId     String
+  riskScore      String   @default("Medium") // High, Medium, Low
+  gapDescription String?
+  requiredAction String?
+  aiRecommendation String?
+  status         String   @default("open") // open, in_progress, resolved
+  organizationId String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  regulation Regulation @relation(fields: [regulationId], references: [id])
+  document   InternalDocument @relation(fields: [documentId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  tasks Task[]
+}
+
+model Task {
+  id               String   @id @default(cuid())
+  title            String
+  description      String?
+  status           String   @default("todo") // todo, in_review, done
+  priority         String   @default("medium") // high, medium, low
+  assigneeId       String?
+  impactAssessmentId String?
+  dueDate          DateTime?
+  organizationId   String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  impactAssessment ImpactAssessment? @relation(fields: [impactAssessmentId], references: [id])
+  organization     Organization @relation(fields: [organizationId], references: [id])
+  comments         Comment[]
+  tags             Tag[]
+  taskTags         TaskTag[]
+  sourceDependencies TaskDependency[] @relation("SourceDependencies")
+  targetDependencies TaskDependency[] @relation("TargetDependencies")
+}
+
+model Comment {
+  id          String   @id @default(cuid())
+  content     String
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorName  String   @default("Sarah Chen")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([taskId])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  action         String
+  entity         String
+  entityId       String
+  details        String?
+  userName       String   @default("Sarah Chen")
+  organizationId String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([organizationId, createdAt])
+}
+
+model Bookmark {
+  id              String       @id @default(cuid())
+  regulationId    String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  regulation      Regulation   @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  @@index([regulationId])
+  @@unique([regulationId])
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  color       String   @default("#6366f1")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  regulations    Regulation[]
+  tasks          Task[]
+  regulationTags RegulationTag[]
+  taskTags       TaskTag[]
+
+  @@index([name])
+}
+
+model RegulationTag {
+  regulationId String
+  tagId        String
+  regulation   Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+  tag          Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([regulationId, tagId])
+}
+
+model TaskTag {
+  taskId String
+  tagId  String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+}
+
+model ChecklistItem {
+  id            String   @id @default(cuid())
+  regulationId  String
+  title         String
+  description   String?
+  category      String
+  isCompleted   Boolean  @default(false)
+  completedAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  regulation    Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+
+  @@index([regulationId])
+}
+
+model RegulationChange {
+  id            String   @id @default(cuid())
+  regulationId  String
+  field         String
+  oldValue      String
+  newValue      String
+  changedBy     String   @default("System")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  regulation    Regulation @relation(fields: [regulationId], references: [id], onDelete: Cascade)
+
+  @@index([regulationId])
+  @@index([createdAt])
+}
+
+model TaskDependency {
+  id               String   @id @default(cuid())
+  sourceTaskId     String
+  targetTaskId     String
+  type             String   @default("blocks") // "blocks" or "blocked_by"
+  createdAt        DateTime @default(now())
+  sourceTask       Task     @relation("SourceDependencies", fields: [sourceTaskId], references: [id], onDelete: Cascade)
+  targetTask       Task     @relation("TargetDependencies", fields: [targetTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceTaskId, targetTaskId, type])
+  @@index([sourceTaskId])
+  @@index([targetTaskId])
+}
+
+model OnboardingStatus {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  completedSteps String   @default("[]") // JSON array of completed step IDs
+  isComplete     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
